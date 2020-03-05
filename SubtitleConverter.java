@@ -1,5 +1,6 @@
 package com.wizd;
 
+import org.jdom2.Content;
 import org.jdom2.Document;
 import org.jdom2.Element;
 import org.jdom2.Text;
@@ -15,29 +16,29 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SubtitleConverter {
-    private static class Phase{
+    public static class Phase{
         public Integer index;
         public Integer phaseSourceLineCount;
         public String timeCodes;
         public List<String> textContents;
     }
 
-    public static List<Phase> parserVtt(String vttFile){
-        List<Phase> phaseList = new ArrayList<>();
-
+    public static List<Phase> parserVttFromFile(String vttFile){
         try {
+            List<Phase> phaseList = new ArrayList<>();
+
             int lineIndex = 0;
 
             List<String> lines = Files.readAllLines(Paths.get(vttFile), StandardCharsets.UTF_8);
 
-            for(int i = 0; i < lines.size(); i++){
+            for(int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
-                if(line.equals("")){
+                if (line.equals("")) {
                     continue;
                 }
 
                 // Get the first line
-                if(line.equals("1")){
+                if (line.equals("1")) {
                     lineIndex = i;
                     break;
                 }
@@ -53,15 +54,15 @@ public class SubtitleConverter {
                 phaseList.add(phase);
                 lineIndex += (phase.phaseSourceLineCount + 1);
             }
+
+            return phaseList;
         }
         catch (Exception e){
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
-
-        return phaseList;
     }
 
-    private static void writePhaseListToSrt(List<Phase> phaseList, String fileName){
+    public static void writePhaseListToSrt(List<Phase> phaseList, String fileName){
         try {
             FileOutputStream fileOutputStream = new FileOutputStream(fileName);
 
@@ -86,10 +87,11 @@ public class SubtitleConverter {
         }
     }
 
-    public static void convertVttToSrt(String vttFileName, String srtFileName){
-        List<SubtitleConverter.Phase> phaseList = parserVtt(vttFileName);
+    public static int convertVttToSrt(String vttFileName, String srtFileName){
+        List<SubtitleConverter.Phase> phaseList = parserVttFromFile(vttFileName);
 
         writePhaseListToSrt(phaseList, srtFileName);
+        return phaseList.size();
     }
 
     private static List<String> readPhase(int startLineIndex, List<String> lines) {
@@ -112,15 +114,20 @@ public class SubtitleConverter {
         Phase phase = new Phase();
         List<String> textContents = new ArrayList<>();
 
-        phase.phaseSourceLineCount = lines.size();
-        phase.index = Integer.parseInt(lines.get(0));
-        phase.timeCodes = getTimeCodes(lines.get(1));
+        try {
+            phase.phaseSourceLineCount = lines.size();
+            phase.index = Integer.parseInt(lines.get(0));
+            phase.timeCodes = getTimeCodes(lines.get(1));
 
-        for(String line: lines.subList(2, lines.size())){
-            textContents.add(appendTextContent(getXmlStrTextContent(line)));
+            for (String line : lines.subList(2, lines.size())) {
+                textContents.add(appendTextContent(getXmlStrTextContent(line)));
+            }
+
+            phase.textContents = textContents;
         }
-
-        phase.textContents = textContents;
+        catch (Exception e){
+            e.printStackTrace();
+        }
 
         return phase;
     }
@@ -138,7 +145,7 @@ public class SubtitleConverter {
     public static List<String> getXmlStrTextContent(String xmlStr){
         List<String> textContent = new ArrayList<>();
         try {
-            xmlStr = "<wizdzz>" + xmlStr + "</wizdzz>";
+            xmlStr = "<wizdzz>" + xmlStr.replaceAll("&lrm;", "") + "</wizdzz>";
 
             SAXBuilder saxBuilder = new SAXBuilder();
 
@@ -146,27 +153,37 @@ public class SubtitleConverter {
             Document document = saxBuilder.build(stream);
 
             for(Object element: document.getRootElement().getContent()){
-                textContent.add(getElementTextValue((Element) element));
+                textContent.add(getElementTextValue(element));
             }
         }
         catch (Exception e){
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
 
         return textContent;
     }
 
-    private static String getElementTextValue(Element element) {
-        if(element.getContent().size() != 1){
-            throw new RuntimeException("Element[" + element.toString() + "] has more than one content!");
+    private static String getElementTextValue(Object element) {
+        if (element instanceof org.jdom2.Text) {
+            return ((Text) element).getText();
         }
 
-        Object content = element.getContent().get(0);
-        if (content instanceof org.jdom2.Text) {
-            return ((Text) content).getText();
+        Element _element = (Element) element;
+        if(_element.getContent().size() != 1){
+            StringBuilder contentBuilder = new StringBuilder();
+
+            for(Object content: _element.getContent()){
+                contentBuilder.append(getElementTextValue(content));
+            }
+            return contentBuilder.toString();
         }
-        else{
-            return getElementTextValue((Element) content);
+        else {
+            Object content = _element.getContent().get(0);
+            if (content instanceof org.jdom2.Text) {
+                return ((Text) content).getText();
+            } else {
+                return getElementTextValue(content);
+            }
         }
     }
 
